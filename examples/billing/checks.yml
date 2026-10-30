@@ -1,0 +1,135 @@
+# Data quality checks for a small billing system: customers, invoices, invoice lines, payments.
+# Run:  python -m dqcheck run examples/billing/checks.yml
+name: Billing data quality
+
+sources:
+  customers:
+    path: data/customers.csv
+    types: {customer_id: VARCHAR, email: VARCHAR, country: VARCHAR, created_at: DATE}
+  invoices:
+    path: data/invoices.csv
+    types: {invoice_id: VARCHAR, customer_id: VARCHAR, invoice_date: DATE, total: "DECIMAL(12,2)", currency: VARCHAR}
+  invoice_lines:
+    path: data/invoice_lines.csv
+    types: {line_id: VARCHAR, invoice_id: VARCHAR, product: VARCHAR, quantity: INTEGER, unit_price: "DECIMAL(12,2)"}
+  payments:
+    path: data/payments.csv
+    types: {payment_id: VARCHAR, invoice_id: VARCHAR, customer_id: VARCHAR, paid_at: TIMESTAMP,
+            amount: "DECIMAL(12,2)", method: VARCHAR}
+
+checks:
+  # --- customers
+  - name: customer_id is unique
+    type: unique
+    table: customers
+    columns: [customer_id]
+
+  - name: customers have an email
+    type: not_null
+    table: customers
+    columns: [email]
+    severity: warn            # invoices can still be sent by post
+
+  - name: email address is well formed
+    type: regex
+    table: customers
+    column: email
+    pattern: '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
+
+  - name: country is a supported ISO code
+    type: accepted_values
+    table: customers
+    column: country
+    values: [US, CA, GB, DE, FR, AU]
+
+  # --- invoices
+  - name: invoice_id is unique
+    type: unique
+    table: invoices
+    columns: [invoice_id]
+
+  - name: invoice customer exists
+    type: foreign_key
+    table: invoices
+    columns: [customer_id]
+    ref_table: customers
+    ref_columns: [customer_id]
+
+  - name: invoice total is not negative
+    type: range
+    table: invoices
+    column: total
+    min: 0
+
+  - name: invoice total equals the sum of its lines
+    type: reconcile
+    parent: invoices
+    parent_key: [invoice_id]
+    parent_amount: total
+    child: invoice_lines
+    child_key: [invoice_id]
+    child_amount: quantity * unit_price
+    tolerance: 0.01
+
+  # --- invoice lines
+  - name: invoice line belongs to an invoice
+    type: foreign_key
+    table: invoice_lines
+    columns: [invoice_id]
+    ref_table: invoices
+    ref_columns: [invoice_id]
+
+  - name: line quantity is at least 1
+    type: range
+    table: invoice_lines
+    column: quantity
+    min: 1
+
+  # --- payments
+  - name: payment_id is unique
+    type: unique
+    table: payments
+    columns: [payment_id]
+
+  - name: payment belongs to an invoice
+    type: foreign_key
+    table: payments
+    columns: [invoice_id]
+    ref_table: invoices
+    ref_columns: [invoice_id]
+
+  - name: no double-charged payments
+    description: same customer, same amount, within 5 minutes
+    type: duplicate_transactions
+    table: payments
+    keys: [customer_id, amount]
+    timestamp: paid_at
+    window_minutes: 5
+
+  - name: payment amount is not extreme
+    type: outliers
+    table: payments
+    column: amount
+    threshold: 8
+
+  - name: no invoice is paid more than its total
+    type: custom_sql
+    table: invoices
+    sql: |
+      SELECT i.invoice_id, i.total, SUM(p.amount) AS paid, SUM(p.amount) - i.total AS overpaid
+      FROM invoices AS i
+      JOIN payments AS p USING (invoice_id)
+      GROUP BY i.invoice_id, i.total
+      HAVING SUM(p.amount) > i.total + 0.01
+
+  - name: payments table is not empty
+    type: row_count
+    table: payments
+    min: 1000
+
+  - name: payments are recent
+    type: freshness
+    table: payments
+    column: paid_at
+    max_age_days: 14
+    as_of: 2026-10-31

@@ -1,0 +1,19 @@
+{
+  "customers have an email": 25,
+  "email address is well formed": 7,
+  "country is a supported ISO code": 5,
+  "customer_id is unique": 8,
+  "line quantity is at least 1": 6,
+  "invoice customer exists": 10,
+  "invoice total is not negative": 8,
+  "invoice total equals the sum of its lines": 28,
+  "invoice line belongs to an invoice": 15,
+  "no double-charged payments": 12,
+  "payment amount is not extreme": 6,
+  "no invoice is paid more than its total": 18,
+  "payment belongs to an invoice": 10,
+  "invoice_id is unique": 0,
+  "payment_id is unique": 0,
+  "payments table is not empty": 0,
+  "payments are recent": 0
+}
